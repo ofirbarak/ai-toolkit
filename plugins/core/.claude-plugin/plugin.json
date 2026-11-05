@@ -1,0 +1,8 @@
+{
+  "name": "core",
+  "version": "0.1.0",
+  "description": "General-purpose skills used across all repos",
+  "author": {
+    "name": "Ofir B"
+  }
+}

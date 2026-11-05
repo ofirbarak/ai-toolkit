@@ -1,0 +1,17 @@
+{
+  "name": "ai-toolkit",
+  "owner": {
+    "name": "Ofir B",
+    "email": "ofirb@air.security"
+  },
+  "metadata": {
+    "description": "Personal skills, plugins and MCP configs shared across repos"
+  },
+  "plugins": [
+    {
+      "name": "core",
+      "source": "./plugins/core",
+      "description": "General-purpose skills used across all repos"
+    }
+  ]
+}
