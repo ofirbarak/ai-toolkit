@@ -7,7 +7,7 @@ One `SKILL.md` per skill serves both tools.
 
 Pick **one** of the two methods below per tool. Doing both makes each skill show up twice.
 
-### A. As a plugin marketplace (versioned, namespaced: `core:pr-description`)
+### A. As a plugin marketplace (versioned, namespaced: `core:my-code-review`)
 
 Claude Code:
 
@@ -53,4 +53,4 @@ Authoring rules and repo layout are in [AGENTS.md](AGENTS.md) — that file is w
 
 | Plugin | Skill | What it does |
 |---|---|---|
-| core | [pr-description](plugins/core/skills/pr-description/SKILL.md) | Drafts a PR title and body from the branch diff |
+| core | [my-code-review](plugins/core/skills/my-code-review/SKILL.md) | Reviews a branch/PR with three finder sub-agents and a judge that tries to disprove each finding with a failing test |

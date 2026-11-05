@@ -56,7 +56,7 @@ for name in sorted(set(claude_plugins) | set(codex_plugins)):
         if data is not None and not isinstance(data.get("mcpServers"), dict):
             err(f"{mcp}: must contain an 'mcpServers' object")
 
-    for sdir in sorted((pdir / "skills").glob("*/")):
+    for sdir in sorted(p for p in (pdir / "skills").glob("*") if p.is_dir()):
         skill = sdir / "SKILL.md"
         if not skill.exists():
             err(f"{sdir}: missing SKILL.md")
@@ -66,10 +66,17 @@ for name in sorted(set(claude_plugins) | set(codex_plugins)):
         if not m:
             err(f"{skill}: missing YAML frontmatter")
             continue
-        fm = dict(
-            (k.strip(), v.strip().strip('"\''))
-            for k, _, v in (line.partition(":") for line in m.group(1).splitlines() if ":" in line and not line.startswith(" "))
-        )
+        fm, key = {}, None
+        for line in m.group(1).splitlines():
+            if line[:1] in (" ", "\t"):          # continuation of a block scalar (>-, |, ...)
+                if key:
+                    fm[key] = (fm[key] + " " + line.strip()).strip()
+                continue
+            if ":" not in line:
+                continue
+            key, _, v = line.partition(":")
+            key, v = key.strip(), v.strip()
+            fm[key] = "" if v in (">", ">-", ">+", "|", "|-", "|+") else v.strip('"\'')
         sname, desc = fm.get("name", ""), fm.get("description", "")
         if sname != sdir.name:
             err(f"{skill}: name '{sname}' != folder '{sdir.name}'")
