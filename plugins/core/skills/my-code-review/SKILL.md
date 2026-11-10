@@ -1,16 +1,17 @@
 ---
 name: my-code-review
 description: >-
-  Review changed code with four sub-agents: three finders that hunt inside the
-  change, for code it re-implements instead of reusing (repo code, installed
-  libraries, common packages), and around it and on its failure paths (callers,
-  stacked PRs, interfering flows, third parties, error handling, logging,
-  tracing, monitoring), and a judge that tries to disprove every finding with a
-  failing test before it is reported. Use when the user wants to review a
-  branch, a PR, or work-in-progress changes.
+  Review changed code with five workers and a judge. Each worker owns one
+  subtask: whether the change fulfils its mission (requirements vs. code,
+  missing features), its design and architecture, code quality, bugs (with a
+  proof for each, including flows and third parties that touch the same code
+  or data), and tests. The judge filters their flags down to what is real and
+  worth acting on, and reports one short line per blocker and should-fix plus
+  a file with the evidence, the full review and the minor extras. Use when the user wants to review a branch, a
+  PR, or work-in-progress changes.
 ---
 
-Three finders look for problems, each in a different place, and a judge tries to disprove everything they find. The finders aim for recall, the judge for precision. Keeping them apart stops a reviewer from talking itself into its own findings.
+Five workers look for problems, each owning one subtask, and a judge decides which of their flags are worth the reader's time. The workers aim for recall, the judge for precision. Keeping them apart stops a reviewer from talking itself into its own findings.
 
 ## 1. Pin the target
 
@@ -28,105 +29,128 @@ Every agent must read the same code: the commit under review, not whatever happe
    git worktree add --detach "$wt" <head>
    ```
 
+4. **Make it runnable.** A fresh worktree has no installed dependencies or build output, so nothing in it can run tests yet. Set it up the way the repo says to (its README, Makefile or `CLAUDE.md`: `npm ci`, `uv sync`, `make install` and the like), or link the main checkout's dependency directories when the lockfiles match. Run one existing test to confirm. If the suite can't run here — it needs services or credentials you don't have — note that; every agent then traces paths instead of running tests, and the report says so.
+
 The diff to review is `git -C "$wt" diff <merge-base> HEAD`. Uncommitted changes are not in the worktree; if the user wants work in progress reviewed, say so and have them commit it first.
 
 ## 2. Gather the context
 
 Before spawning anything, collect:
 
-- The diff and the commits (`git -C "$wt" log --oneline <merge-base>..HEAD`), and the PR description and discussion if there is a PR.
+- **The mission.** What this change is supposed to achieve: the PR description, the linked issue or ticket (Linear, GitHub), and any spec, plan or design doc the PR or ticket points to. If none of these exist, ask the user what the change is meant to do before going on; the mission worker has nothing to check against without it.
+- The diff and the commits (`git -C "$wt" log --oneline <merge-base>..HEAD`), and the PR discussion if there is a PR.
+- **Earlier review.** The PR's review threads with their resolved state (`gh pr view <n> --comments`, and the inline ones from `gh api repos/{owner}/{repo}/pulls/<n>/comments`). They go to the judge, not the workers, so the workers look with fresh eyes.
 - **The stack.** Whether this PR is one of a stack: its base isn't the default branch, or other PRs build on it (`gh pr list --base <headRefName>`). Note each related PR and what it changes.
 - The repo's standards files that cover the touched files: `CLAUDE.md` files from the root down to each touched directory, `CONTRIBUTING.md` and the like.
 
-Each sub-agent knows only its prompt, so paste in: the worktree path, with the rule to read code only from there and run every `git` command as `git -C <worktree>`; the diff command, the commits, the PR description, the stack, the finder's or judge's brief below, and **Where not to spend effort**. Finders and the judge are fresh `general-purpose` agents.
+Each sub-agent knows only its prompt, so paste in: the worktree path, with the rule to read code only from there and run every `git` command as `git -C <worktree>`; the diff command, the commits, the mission, the PR discussion, the stack, the standards files' paths, the worker's or judge's brief below, and **Where not to spend effort**. Workers and the judge are fresh `general-purpose` agents.
 
-## 3. Run the three finders
+## 3. Run the workers
 
-Spawn all three in one message; they look at different things and don't need each other.
+Spawn the workers in one message; they own different subtasks and don't need each other. Never run more than five. Scale down for a small change, counting changed lines without lockfiles and generated files:
 
-Finders A and C end their briefs with the same rules (Finder B reports in its own format):
+- **Under ~50 lines:** skip the design worker (3.2) and fold the tests worker's brief (3.5) into the bugs worker's (3.4). Three workers.
+- **~50 lines and up:** all five. On a very large change (over ~1,000 lines), tell the bugs worker to rank the areas of the change by risk — data writes, auth, external calls, migrations first — and go deep on those rather than skim everything.
 
-> Report candidates, not verdicts. For each: `file:line`, the scenario that triggers it (the exact input, state, or sequence of events), and what goes wrong. Keep a candidate you're unsure can happen in production — a judge decides that. Drop one you can't give a scenario for. Don't edit files.
+Say in the report which shape ran.
 
-### Finder A — inside the change
+Every worker's prompt ends with the same rules:
 
-> Read the diff, then enough surrounding code to understand each change. Look for:
->
-> 1. **The core change doesn't do what it means to.** Work out the intent from the code, commits, and PR description, then trace the main path through the new code.
-> 2. **Edge cases.** Empty, null/None, zero, very large, duplicate, unicode, first-run and retry inputs. Wrong condition, inverted check, off-by-one, a missed case in a branch or match.
-> 3. **State and data.** A partial write with no rollback, a cache or derived value left stale, a migration or format change that breaks existing data.
-> 4. **Security.** Unvalidated input reaching a query, shell, path, template or redirect; a missing auth or ownership check; a secret returned to a caller.
-> 5. **Resources.** Leaks, unbounded loops or growth, N+1 queries, blocking calls on a hot path.
-> 6. **Tests.** Changed behaviour with no test covering it, or a test that would still pass if the change were wrong.
+Raise flags, not verdicts. For each flag: the subtask, `file:line` (or "missing" for something that isn't there), what is wrong, why it matters, and the evidence — the scenario, test, trace or quoted requirement that shows it. Keep a flag you're unsure of; the judge decides whether it is real and worth reporting. Drop one you can't give evidence for. Never modify existing files; a test or script you write goes in a new file named `review_<subtask>_*` inside the worktree, and you say in the flag how to run it. Other workers are running tests in this worktree at the same time: run only the tests you target, one file or test at a time, never the whole suite, and don't run anything that resets a shared database or binds a fixed port. Only the tests worker runs the full suite.
 
-### Finder B — reuse instead of re-implementing
+### 3.1 Mission
 
-> For every piece of the change — each new function, class, helper, constant, type, query, component, script, or config block — work out what it is trying to do, then search for whether that already exists:
->
-> 1. **In this repo.** A helper, util, base class, hook, component, query builder, fixture, or config that does the same or nearly the same thing. Search by what the code does, not only by its name; the existing one is often named differently. Also look for the reverse: the change copies a block of existing code instead of calling it or extracting it.
-> 2. **In what the repo already depends on.** The language's standard library, the framework, and the packages already installed (check the manifests and lockfiles).
-> 3. **In a common, maintained library the repo doesn't use yet**, when the hand-rolled version is non-trivial: parsing, retries and backoff, date and time math, crypto, validation, concurrency, rate limiting.
->
-> Then judge whether reusing it is reasonable here. Same behaviour, including edge cases and errors? Would using it be simpler than what was written? For a new library, is the dependency worth it? A near-match that would have to be bent to fit is not a finding.
->
-> For each candidate: the new code (`file:line`) and what it does, the existing thing (`path:line`, or package and function), and why it fits. Don't edit files.
+Does this change do what it was asked to do?
 
-### Finder C — around the change, and when it fails
+1. **Break the mission into requirements.** List every requirement the mission states or clearly implies: features, behaviours, constraints, acceptance criteria, edge cases called out in the ticket or spec.
+2. **Map each requirement to the code** that implements it (`file:line`), or mark it missing. Flag every requirement that is not implemented at all — a whole missing feature is the most important flag this worker can raise — and every one implemented only partly, or differently from what was asked.
+3. **Check the implemented parts cover the mission end to end.** Follow the main path a user or caller takes, from entry point to stored result or response. Flag a step that is stubbed, hard-coded, behind a flag nobody turns on, or not wired into the entry point.
+4. **Flag scope drift**: code the mission didn't ask for.
 
-> The change doesn't run alone, and it won't always succeed. First, look outside the diff for:
->
-> 1. **Callers.** A changed signature, return shape, default, or API response that unchanged code still relies on. Search for every caller; the diff won't show them.
-> 2. **The stack.** What this PR depends on from the PRs below it, and what the PRs above it expect from it. A change that is fine alone but breaks with its stack.
-> 3. **Flows that don't touch this code but interfere with it.** Other writers to the same tables or files, background jobs and workers, scheduled tasks, retries, concurrent requests, caches. Find them by searching for the tables, keys, queues and files the change reads or writes.
-> 4. **Third parties.** The database (constraints, triggers, locks, isolation level), queues, external APIs, and anything else whose behaviour the change assumes. Check the assumption against how it actually behaves.
->
-> Then walk every way the changed code can fail — a thrown error, a timeout, a bad response from one of those callers, flows or third parties, a rejected write — and follow what happens next. When this code fails in production, will anyone know, and can they find out why?
->
-> 5. **Failures are loud.** No error swallowed, caught too broadly, logged and ignored, or turned into a misleading default; no fallback that hides a real failure. A failure stops the operation rather than leaving it half done or in a bad state.
-> 6. **Errors are understandable.** Error messages and logs say what failed, on which entity, and why, with the IDs needed to look it up.
-> 7. **The flow can be tracked.** Logs carry the request or job ID, traces propagate across services and async hops, and a failure shows up in a metric or alert someone watches.
-> 8. **It can be debugged.** Someone holding only the logs, traces and metrics could tell which step failed and reproduce it.
-> 9. **Nothing leaks.** Logs, errors and traces don't carry secrets or personal data.
+Return the requirement-to-code map along with the flags.
 
-## 4. Check standards and smells yourself
+### 3.2 Design and architecture
 
-This pass needs the standards files, not proof, so it doesn't need a sub-agent. Read the standards files from step 2 in the worktree, and check the diff against them, citing the file and quoting each rule it breaks. Then look for the smells below. Smells are always judgement calls, and a documented standard overrides them.
+First, build the design from the code, top down, and write it out: the entry points, the components the change adds or touches, the data it reads and writes, and the flow from request to result. Then place it in the system: which existing flows this change plugs into or interferes with, and what each of them looks like before and after the change.
 
-- **Mysterious Name**: a name that doesn't reveal what it does or holds. → rename; if no honest name comes, the design's murky.
-- **Duplicated Code**: the same logic shape in more than one place in the change. → extract it, call it from both.
-- **Feature Envy**: a method that reaches into another object's data more than its own. → move it onto that data.
-- **Data Clumps**: the same few fields or params travelling together. → bundle them into one type.
-- **Primitive Obsession**: a primitive or string standing in for a concept that deserves its own type. → give it one.
-- **Repeated Switches**: the same `switch`/`if`-cascade on the same type in several places. → polymorphism, or one shared map.
-- **Shotgun Surgery**: one logical change scattered across many files. → gather what changes together.
-- **Divergent Change**: one module edited for several unrelated reasons. → split it.
-- **Speculative Generality**: abstraction, parameters, or hooks for needs nobody has yet. → delete it.
-- **Message Chains**: long `a.b().c().d()` navigation. → hide the walk behind one method.
-- **Middle Man**: a class or function that mostly delegates onward. → call the real target.
-- **Refused Bequest**: a subclass that ignores most of what it inherits. → use composition.
+Then judge the design on:
 
-## 5. Run the judge
+1. **Simplicity.** Is this the simplest design that meets the mission? Could a layer, abstraction, table, service or config be dropped?
+2. **Extend, don't add.** Is there an existing flow, component, table or extension point this should have extended instead of building a parallel one?
+3. **Blast radius.** How much of the system does the change touch, and could it touch less? What else breaks or has to change if this design is wrong?
+4. **Generality.** Is it generic where the next similar feature will need it, without speculative generality for needs nobody has?
+5. **Resilience.** What happens when a dependency is slow, down, or returns garbage; on retries, duplicates, partial failures, and restarts mid-flow?
+6. **Boundaries and ownership.** Is each responsibility in one place, in the module that owns that concept? Are the interfaces between parts narrow?
+7. **Operability and evolution.** Can it be rolled out and rolled back safely (migrations, flags, backward-compatible formats)? Can it be observed?
 
-Once all three finders have returned, spawn the judge with every candidate from them, plus the context from step 2. The finders are done with the worktree, so the judge writes and runs its tests there; nothing it writes touches the user's checkout.
+Finish with how you would design it, if differently, and what that would save. Return the written design along with the flags; the judge needs it as context.
 
-> You get a list of candidate findings. Assume each is wrong until you prove it. For each:
->
-> 1. **Reproduce it.** Write a test that fails on the current code and run it. If a test isn't possible (the bug needs production infrastructure, timing, or a third party you can't stand up), trace the path step by step through the actual code instead, and say why there's no test.
-> 2. **Judge whether it can happen.** Can this input or state actually reach this code in production? Is it already caught before it gets here — validation upstream, a caller guard, a DB constraint, an earlier check? Name the guard if you find one.
-> 3. **Give a verdict:** **Confirmed** (with the failing test or the traced path, and a severity), **Unreachable**, **Already caught** (name what catches it), or **Not a bug** (say why). If the candidate is real but not for the reason given, confirm the real reason.
->
-> Reuse candidates (code that re-implements something that already exists) have no bug to reproduce. Check the fit instead: read the existing code or library function, and where you can, run it on the same inputs as the new code, edge cases included, to show it behaves the same. Verdict: **Confirmed** (it fits, and swapping it in is simpler) or **Doesn't fit** (name the difference that matters).
->
-> Return the confirmed findings with their tests, and one line per rejected candidate.
+### 3.3 Code quality
 
-## 6. Report
+1. **Reuse.** For every new function, class, helper, constant, type, query, component, script or config block, search for whether it already exists: in this repo (search by what it does, not only its name; also catch a copied block that should call or extract the original), in what the repo already depends on (standard library, framework, installed packages), or, when the hand-rolled version is non-trivial, in a common maintained library. Flag only a fit with the same behaviour, edge cases and errors included, that would be simpler than what was written.
+2. **Dead code.** Code the change adds or leaves behind that nothing calls: unused functions, parameters, branches, flags, imports, config keys.
+3. **Comments and docs.** Too many: comments that restate the code, narrate the change, or carry ticket IDs. Wrong: a comment or doc the change made stale. Missing: a `CLAUDE.md`, README, API doc or runbook that should have changed with the code and didn't.
+4. **Names.** A name that doesn't say what it does or holds, or a domain term the repo already has a different word for.
+5. **Simplicity.** Deep nesting, long functions doing several things, clever code where plain code would do.
+6. **Standards.** Every rule in the standards files the diff breaks, quoting the rule.
+7. **Smells**, always judgement calls, and overridden by a documented standard: Duplicated Code, Feature Envy, Data Clumps, Primitive Obsession, Repeated Switches, Shotgun Surgery, Divergent Change, Speculative Generality, Message Chains, Middle Man, Refused Bequest.
 
-1. **Confirmed bugs**, most severe first. For each: `file:line`, the scenario, the proof (the failing test, or the traced path), and why it can happen in production.
-2. **Reuse**: each piece of new code that should call something existing instead, naming the new code, the existing thing, and how the judge showed it fits.
-3. **Standards and smells** from step 4, marked hard (a documented rule) or judgement (a smell).
-4. **Ruled out**: one line per rejected candidate and why, so the reader sees what was checked.
+### 3.4 Bugs
 
-Then remove the worktree: `git worktree remove --force "$wt"`. The judge's tests are already in the report.
+Find what the code does not handle, and prove each one: a test that fails on the current code, or, when a test needs production infrastructure, timing or a third party you can't stand up, the exact input or sequence of events and the step-by-step path through the code.
+
+1. **Inside the change.** The main path doing the wrong thing; edge cases (empty, null/None, zero, very large, duplicate, unicode, first-run and retry inputs); wrong or inverted conditions, off-by-one, a missed case; partial writes with no rollback; stale caches or derived values; a migration or format change that breaks existing data; security (unvalidated input reaching a query, shell, path, template or redirect, a missing auth or ownership check, a secret returned to a caller); leaks, unbounded growth, N+1 queries, blocking calls on a hot path.
+2. **Callers and the stack.** A changed signature, return shape, default or API response that unchanged code still relies on — search for every caller, the diff won't show them. What this PR needs from the PRs below it, and what the PRs above expect from it.
+3. **Other flows on the same code and data.** List every table, key, queue, file, cache and external resource the change reads or writes, then search for everything else that touches them: other writers, readers that assume the old shape or meaning, background jobs, scheduled tasks, retries, concurrent requests. A table this change writes that another service reads is in scope.
+4. **Third parties.** The database (constraints, triggers, locks, isolation level), queues, external APIs, and anything else whose behaviour the change assumes. Check the assumption against how it actually behaves.
+5. **Failure paths.** Walk every way the changed code can fail and follow what happens next: an error swallowed or turned into a misleading default, an operation left half done, a failure nobody would notice or could diagnose from the logs.
+
+### 3.5 Tests
+
+1. **Meaningful tests.** Do the tests assert the behaviour the mission asks for, through the public surface? Flag a test that would still pass if the change were wrong, one that only checks a mock was called, or one that pins incidental detail.
+2. **Coverage.** You are the only worker allowed to run the whole suite. Run the touched packages' tests with coverage and report the changed lines and branches no test executes. If the suite can't run here, say why and estimate from reading.
+3. **Untested flows.** Each requirement, error path, edge case and integration point (callers, other flows on the same data, third parties) with no test.
+4. **End-to-end tests to run at the end.** The few end-to-end scenarios worth running before this ships — on a local stack, staging or by hand — each with its steps and the expected result.
+
+## 4. Run the judge
+
+Once every worker has returned, create the report directory outside the worktree, so it survives the cleanup:
+
+```bash
+report="${TMPDIR:-/tmp}/code-review-$(git rev-parse --short <head>)-report"
+mkdir -p "$report/evidence"
+```
+
+Then spawn the judge with every flag, each tagged with its subtask, plus the mission, the design write-up and requirement map from the workers, the context from step 2 including the earlier review threads, and the report directory's path as `<report-dir>`. The workers are done with the worktree, so the judge can run their tests and write its own there; nothing touches the user's checkout.
+
+You are the judge. Workers raised flags with their evidence; most reviews drown the reader in flags nobody needs. Your job is to keep only what is real and worth acting on. A review with no findings is a good result when the change is sound — never promote a weak flag to fill the summary.
+
+1. **Merge** flags that describe the same problem, keeping every worker's evidence.
+2. **Check it is real.** Run the worker's test or follow its trace through the actual code. For a bug, ask whether the input or state can reach this code in production, or whether something already catches it — validation upstream, a caller guard, a DB constraint, an earlier check; name the guard. For a missing requirement, check the requirement really is in the mission and really isn't implemented elsewhere. For a reuse flag, read the existing code and, where you can, run it on the same inputs to show it behaves the same. If a flag is real for a different reason than given, keep it with the real reason.
+3. **Check it is worth reporting.** Filter out: a flow so unlikely or unreliable that nobody will hit it, a flow nobody cares about, a small improvement that changes nothing for users or maintainers, a nitpick, a preference the repo doesn't document. When in doubt about a missing feature, a data-loss or security bug, keep it.
+4. **Check it against earlier review.** Drop a flag a reviewer already raised and the author answered or fixed; it isn't news. Raise one yourself for a review thread marked resolved whose code didn't change and whose reply doesn't explain why — the comment was closed, not addressed.
+5. **Rate what's left:**
+   - **Blocker** — the mission isn't met (a missing feature, a broken main path), data is lost or corrupted, a security hole, or a production outage on a path real traffic takes.
+   - **Should fix** — a real bug on a less common path, a design choice that will cost the next change, a flow with no test where a regression would go unnoticed.
+   - **Extra** — everything else that is real but below that bar: a simpler design, a reuse, a clearer name, a minor gap. These go in the file only, never in the summary.
+
+Then write the review in two parts, and give each kept finding an ID (`M1`, `D1`, `Q1`, `B1`, `T1` — by subtask) used in both:
+
+- **Summary**, returned as your answer: a one-line verdict on whether the change fulfils its mission and is ready, then each blocker and should-fix as one short line — ID, rating, `file:line`, and what is wrong in plain words — grouped by subtask in order (mission, design, code quality, bugs, tests), then the end-to-end tests to run. If there are none, say so in one line; don't list extras to fill the space.
+- **Full review**, written to `<report-dir>/review.md`. It opens with what was reviewed — the PR or branch, the head commit, the date, which worker shape ran, and whether tests could run — then goes by subtask in the same order, each blocker and should-fix under its ID with its evidence — the failing test and how to run it, the traced path, the quoted requirement — why it matters, and the suggested fix. Include the design as you understand it and the requirement-to-code map. Then **Extras**: each extra, one short paragraph with `file:line` and the suggestion. End with **Ruled out**: one line per filtered flag and why, so the reader sees what was checked. Copy every test or script cited as evidence into `<report-dir>/evidence/`, keeping its path relative to the repo root, and link to it from the finding.
+
+## 5. Report
+
+When the judge returns, open with its summary as it is — one short line per blocker and should-fix, nothing else — and end with the absolute path to `$report/review.md` for the evidence, the full review, and the extras (say how many extras there are, without listing them). Then remove the worktree: `git worktree remove --force "$wt"`. The evidence is already copied out.
+
+## Re-review
+
+When the user asks to review the same PR or branch again, usually after fixing findings:
+
+1. **Find the previous review**: the newest `${TMPDIR:-/tmp}/code-review-*-report/review.md` whose header names the same PR or branch. If there is none, or more than one could fit, ask the user for its path.
+2. **Run steps 1–4 on the new head as usual**, and also give every worker the diff since the previously reviewed head (`git -C "$wt" diff <previous head> HEAD`), to read closely: fixes are where new bugs come from.
+3. **Give the judge the previous `review.md` too.** For every earlier finding, it records **fixed** (with what fixed it), **still open**, or **no longer applies** (the code was removed or rewritten). It keeps earlier IDs and numbers new findings after the highest earlier one, and doesn't re-raise a flag the earlier review ruled out unless the code under it changed.
+4. **The summary opens with the earlier findings' status**, one line each, before the new findings.
 
 ## Where not to spend effort
 
