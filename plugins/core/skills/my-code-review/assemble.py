@@ -24,9 +24,17 @@ def load_slots(report: Path) -> dict[str, str]:
     return slots
 
 
+def expand_includes(text: str, depth: int = 0) -> str:
+    if depth > 5:
+        raise RecursionError("includes nested more than 5 deep")
+    return INCLUDE.sub(
+        lambda match: expand_includes((PROMPTS / match.group(1)).read_text().rstrip("\n"), depth + 1),
+        text,
+    )
+
+
 def assemble(template: str, slots: dict[str, str]) -> tuple[str, list[str]]:
-    text = (PROMPTS / f"{template}.md").read_text()
-    text = INCLUDE.sub(lambda match: (PROMPTS / match.group(1)).read_text(), text)
+    text = expand_includes((PROMPTS / f"{template}.md").read_text())
     missing = sorted(set(SLOT.findall(text)) - slots.keys())
     return SLOT.sub(lambda match: slots.get(match.group(1), match.group(0)), text), missing
 
