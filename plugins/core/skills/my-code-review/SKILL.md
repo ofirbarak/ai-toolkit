@@ -4,12 +4,28 @@ description: >-
   Use when the user wants a branch, a PR, or work-in-progress changes reviewed —
   "review this PR", "review my branch", "is this ready to merge", "check what I
   changed" — or wants an earlier review of the same PR or branch run again after
-  fixes.
+  fixes. Runs in normal mode by default, or fast mode ("fast", "quick review")
+  for a quicker, lighter pass.
+argument-hint: "[fast|normal] [PR number or branch]"
 ---
 
 Five workers look for problems, each owning one subtask — mission, design, code quality, bugs, tests — and a judge decides which of their flags are worth the reader's time. The workers aim for recall, the judge for precision. Keeping them apart stops a reviewer from talking itself into its own findings.
 
 Before the workers start, a mapper reads the whole change once and writes down what is there — the requirements, the areas, the resources touched and who else touches them — so every worker starts from the same facts, with the same IDs, and spends its effort judging.
+
+## Mode
+
+The first argument picks the mode: `fast` or `normal`. Anything else — a PR number, a branch, nothing at all — means `normal`, and the arguments that follow the mode name the target: `/my-code-review fast 123`, `/my-code-review normal my-branch`, `/my-code-review 123`. Without arguments, a user who asks in words for a quick or fast review gets `fast`.
+
+| | normal | fast |
+|-|--------|------|
+| Context | PR, ticket, linked specs, review threads, stack, standards | PR and ticket, review threads, standards; no specs or stack |
+| Dependencies and tests | installed in the worktree; workers and judge run tests | not installed; nothing runs, evidence is traced through the code |
+| Mapper | yes | no |
+| Workers | four or five, one per subtask | two in parallel: correctness (mission, bugs) and maintainability (design, quality, tests) |
+| Judge | verifies by running tests and reading | verifies by reading |
+
+Steps 1–6 below describe `normal`. In `fast`, follow them with the changes in **Fast mode**.
 
 ## How the prompts are built
 
@@ -44,6 +60,8 @@ The prompts stay in the report directory, so you can see exactly what each agent
 | `report_dir` | — | Filled in by the script | all |
 
 `prior_review` and `previous_review` go to the judge only, so the workers look with fresh eyes.
+
+In fast mode, `test_setup`, `stack` and the `focus_*` slots aren't written: the fast workers read `worktree`, `merge_base`, `target`, `mission` and `previous_head`, the maintainability worker also `standards`, and the fast judge `standards`, `prior_review`, `shape` and `previous_review` as well.
 
 ## 1. Pin the target
 
@@ -114,14 +132,36 @@ Spawn the judge. It reads the map and every flags file itself — don't relay th
 
 Open with the judge's summary as it is. End with the absolute path to `$report/review.md`, for the evidence, the full review and the extras. Then remove the worktree: `git worktree remove --force "$wt"`. The evidence is already copied out.
 
+## Fast mode
+
+The same steps, trimmed for speed. Say at the start that this is a fast review.
+
+1. **Pin the target** as usual, but skip step 1.4: don't install dependencies or run a test. Name the report directory `code-review-<stamp>-fast-report`, so a later review can tell the modes apart.
+2. **Gather the context** without the specs and docs the PR or ticket links to, and without the stack. Read the PR description and the linked ticket, the review threads, and the standards files. If there is no mission, take it from the commit messages rather than asking the user, and say so in `mission`. Write `mission`, `standards`, `prior_review`, `previous_head` and `previous_review`.
+3. **Skip the mapper.**
+4. **Run two workers**, whatever the size of the change. Write `shape` (`fast: correctness, maintainability`), then assemble and spawn both in one message:
+
+   ```bash
+   python3 <skill-dir>/assemble.py "$report" fast-correctness fast-maintainability
+   ```
+
+   They write `$report/flags/correctness.md` and `$report/flags/maintainability.md`. Retry a worker that left no file once, as in normal mode.
+5. **Run the judge** from `fast-judge`:
+
+   ```bash
+   python3 <skill-dir>/assemble.py "$report" fast-judge
+   ```
+
+6. **Report** as usual, and end by offering a normal review when the fast one leaves a finding marked **unverified**, or when the change is over ~1,000 lines.
+
 ## Re-review
 
 When the user asks to review the same PR or branch again, usually after fixing findings:
 
-1. **Find the previous review:** the newest `${TMPDIR:-/tmp}/code-review-*-report/review.md` whose header names the same PR or branch. If there is none, or more than one could fit, ask the user for its path.
+1. **Find the previous review:** the newest `${TMPDIR:-/tmp}/code-review-*-report/review.md` whose header names the same PR or branch, in either mode. If there is none, or more than one could fit, ask the user for its path.
 2. **Write** its head commit, from its header, into `previous_head`, and its path into `previous_review`. The mapper then maps what changed since, the workers read that diff closely — fixes are where new bugs come from — and the judge gives each earlier finding a status before the new ones.
-3. **Run steps 1–6 as usual**, in a new worktree and report directory.
+3. **Run steps 1–6 as usual**, in the mode the user asked for this time, in a new worktree and report directory.
 
 ## Changing a prompt
 
-Change the template in `prompts/`, never an assembled prompt in a report directory. The rules every worker shares — where to read and write, running tests alongside other workers, the flag format, what isn't worth flagging — live once, in `prompts/_worker-rules.md`, which each worker template includes with `{{include:_worker-rules.md}}`. A new slot needs a row in the table above, saying which step writes it.
+Change the template in `prompts/`, never an assembled prompt in a report directory. The rules every worker shares — where to read and write, running tests alongside other workers, the flag format, what isn't worth flagging — live once, in `prompts/_worker-rules.md`, which each worker template includes with `{{include:_worker-rules.md}}`. Includes can nest. The parts both modes share live once too: the flag format in `_flags.md` (included by `_worker-rules.md` and `_fast-worker-rules.md`), and the judge's filter and ratings in `_judge-filter.md` (included by `judge.md` and `fast-judge.md`). A new slot needs a row in the table above, saying which step writes it.
