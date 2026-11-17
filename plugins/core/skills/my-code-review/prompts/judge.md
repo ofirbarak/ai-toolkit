@@ -39,7 +39,7 @@ Read all of these before judging:
 - `{{report_dir}}/context.md` — the map of the change, with the requirement IDs `R…` and area IDs `A…` the flags refer to.
 - Every file in `{{report_dir}}/flags/`, in full: one per worker, each holding that worker's write-up and its flags, and `mapper.md`, what the mapper noticed while it read the change.
 
-Read code only from the worktree `{{worktree}}`, and run every `git` command as `git -C {{worktree}}`. The workers are done with it, so you can run their tests and write your own there, in new files named `review_judge_*`.
+Read code only from the worktree `{{worktree}}`, and run every `git` command as `git -C {{worktree}}`. The workers are done with it, so you can run the tests they wrote and write your own there, in new files named `review_judge_*`. Don't run the PR's own tests: CI runs them, and its result is under "How tests run here".
 
 ## 1. Merge
 
@@ -61,7 +61,7 @@ If a flag is real for a different reason than given, keep it with the real reaso
 
 Write `{{report_dir}}/review.md`:
 
-1. **Header:** the PR or branch, the head commit, today's date, which workers ran, and whether tests could run.
+1. **Header:** the PR or branch, the head commit, today's date, which workers ran, CI's result at the head, and whether new tests could run.
 2. On a re-review, **Previous findings:** each earlier finding's ID and its status.
 3. **Findings**, by subtask in the order mission, design, code quality, bugs, tests: each blocker and should-fix under its ID, with its rating, `file:line`, what is wrong, the evidence — the failing test and how to run it, the traced path, the quoted requirement — why it matters, and the suggested fix.
 4. **The design**, as you understand it, and **the requirement-to-code map**, corrected where you found it wrong.
