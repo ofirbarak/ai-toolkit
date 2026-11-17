@@ -52,7 +52,7 @@ Write `{{report_dir}}/slots/focus_mission.md`, `focus_design.md`, `focus_quality
 - **Design:** the entry points, the existing flows and components the change plugs into, and the resources it shares with other code.
 - **Code quality:** how many new symbols there are to check for reuse, the areas with the most new code, and the standards files that apply to which areas.
 - **Bugs:** the top of the risk order, the resources with other writers or readers, and the changed surface with callers outside the diff. If the change is over ~1,000 changed lines, say which areas to go deep on and which to skim.
-- **Tests:** the commands from "How tests run here" for the touched packages, and the requirements and areas no test touches.
+- **Tests:** the test files for the touched packages, and the requirements and areas no test touches.
 
 On a re-review, start each note with the areas changed since the previous review.
 

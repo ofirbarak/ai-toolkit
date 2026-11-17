@@ -20,10 +20,10 @@ The first argument picks the mode: `fast` or `normal`. Anything else — a PR nu
 | | normal | fast |
 |-|--------|------|
 | Context | PR, ticket, linked specs, review threads, stack, standards | PR and ticket, review threads, standards; no specs or stack |
-| Dependencies and tests | installed in the worktree; workers and judge run tests | not installed; nothing runs, evidence is traced through the code |
+| Dependencies and tests | installed in the worktree; the PR's own tests are left to CI, and agents run only new tests they write to check what those don't cover | not installed; nothing runs, evidence is traced through the code |
 | Mapper | yes | no |
 | Workers | four or five, one per subtask | two in parallel: correctness (mission, bugs) and maintainability (design, quality, tests) |
-| Judge | verifies by running tests and reading | verifies by reading |
+| Judge | verifies by running the workers' new tests and reading | verifies by reading |
 
 Steps 1–6 below describe `normal`. In `fast`, follow them with the changes in **Fast mode**.
 
@@ -48,7 +48,7 @@ The prompts stay in the report directory, so you can see exactly what each agent
 | `worktree` | 1 | The worktree's absolute path, alone | all |
 | `merge_base` | 1 | The merge-base commit, alone | mapper |
 | `target` | 1 | The PR number and title or the branch; the head commit; the base ref and the merge-base; the diff command `git -C <worktree> diff <merge-base> HEAD`; the commits (`git -C <worktree> log --oneline <merge-base>..HEAD`); the changed-line count | all |
-| `test_setup` | 1 | The commands to run one test, one package's tests, and a package's tests with coverage — or why tests can't run here, so every agent traces paths instead | mapper, mission, bugs, tests, judge |
+| `test_setup` | 1 | The PR's CI checks and their state at the head commit (or "No CI run."), and the command to run a single test file — or why tests can't run here, so every agent traces paths instead | mapper, mission, bugs, tests, judge |
 | `mission` | 2 | Verbatim: the PR description, the linked ticket, and the paths of the specs, plans and design docs they point to — or the user's own words | all |
 | `standards` | 2 | The paths of every `CLAUDE.md` from the root down to each touched directory, `CONTRIBUTING.md`, a glossary, and the like | mapper, design, quality, judge |
 | `stack` | 2 | Each related PR — below this one or built on it — and what it changes; or "Not stacked." | mapper, design, bugs, judge |
@@ -83,9 +83,10 @@ Every agent must read the same code: the commit under review, not whatever happe
    ```
 
    The report directory sits outside the worktree, so it survives the cleanup.
-4. **Make it runnable.** A fresh worktree has no installed dependencies or build output. Set it up the way the repo says to (its README, Makefile or `CLAUDE.md`: `npm ci`, `uv sync`, `make install` and the like), or link the main checkout's dependency directories when the lockfiles match. Run one existing test to confirm. If the suite can't run here — it needs services or credentials you don't have — that goes in `test_setup`, and the report says so.
-5. **Count the changed lines**, without lockfiles and generated files, for `target` and the worker shape.
-6. **Write** `worktree`, `merge_base`, `target` and `test_setup`.
+4. **Make it runnable.** A fresh worktree has no installed dependencies or build output. Set it up the way the repo says to (its README, Makefile or `CLAUDE.md`: `npm ci`, `uv sync`, `make install` and the like), or link the main checkout's dependency directories when the lockfiles match. The setup is only for the new tests the agents write to check what the PR's tests don't cover; don't run the PR's own tests or the suite — CI does that. Confirm the setup by running one existing test file. If tests can't run here — they need services or credentials you don't have — that goes in `test_setup`, and the report says so.
+5. **Read CI.** For a PR, `gh pr checks <n>`; for a branch, the checks on its head commit. Take CI's result as the verdict on the PR's own tests. A failing or pending check goes in `test_setup`, and the report says so.
+6. **Count the changed lines**, without lockfiles and generated files, for `target` and the worker shape.
+7. **Write** `worktree`, `merge_base`, `target` and `test_setup`.
 
 ## 2. Gather the context
 
@@ -126,7 +127,7 @@ Each worker writes `$report/flags/<subtask>.md` and answers with a one-line-per-
 python3 <skill-dir>/assemble.py "$report" judge
 ```
 
-Spawn the judge. It reads the map and every flags file itself — don't relay the workers' answers to it; they are summaries, and the files hold the evidence. The workers are done with the worktree, so the judge can run their tests and write its own there; nothing touches the user's checkout. It writes `$report/review.md` and answers with the summary.
+Spawn the judge. It reads the map and every flags file itself — don't relay the workers' answers to it; they are summaries, and the files hold the evidence. The workers are done with the worktree, so the judge can run the tests they wrote and write its own there; nothing touches the user's checkout. It writes `$report/review.md` and answers with the summary.
 
 ## 6. Report
 

@@ -4,7 +4,7 @@
 
 **Where you write.** Never modify an existing file. A test or script you write goes in a new file inside the worktree named `review_<your subtask>_<what it shows>`, and the flag that cites it says how to run it. Your write-up and flags go in one file, `{{report_dir}}/flags/<your subtask>.md`. Don't fix the code, and don't comment on the PR.
 
-**Running tests.** Other workers are running tests in this worktree at the same time. Run only the tests you target, one file or test at a time, never the whole suite (the tests worker is the only exception), and never anything that resets a shared database or binds a fixed port.
+**Running tests.** Don't run the PR's own tests: CI runs them, and its result is under "How tests run here". Run a test only to check something they don't cover — a new test you wrote to prove a bug or exercise an untested flow. Other workers may be running theirs in this worktree at the same time, so run one file at a time, never the whole suite, and never anything that resets a shared database or binds a fixed port.
 
 **The map is a head start, not the boundary.** `{{report_dir}}/context.md` was written by a reader who looked at the whole change but judged nothing. Use its IDs — requirements `R1…`, areas `A1…` — in your flags so the judge can line them up across workers. Search past it: it can miss a caller, a reader of a table, a requirement.
 
