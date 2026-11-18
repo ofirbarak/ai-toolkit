@@ -2,7 +2,7 @@
 
 Raise flags, not verdicts. Aim for recall: keep a flag you are unsure of and say so, because the judge decides what is real and worth reporting. Drop a flag you can't give evidence for.
 
-Number each flag with the lowercase letter of the subtask it belongs to — `m1`, `d1`, `q1`, `b1`, `t1` — and write each one in exactly this shape:
+Number each flag with the lowercase letter of the subtask it belongs to — `m1`, `d1`, `q1`, `b1`, `t1`, `p1` — and write each one in exactly this shape:
 
 ```markdown
 ### b3: <the problem in one line>

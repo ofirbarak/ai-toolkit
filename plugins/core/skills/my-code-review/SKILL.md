@@ -9,7 +9,7 @@ description: >-
 argument-hint: "[fast|normal] [PR number or branch]"
 ---
 
-Five workers look for problems, each owning one subtask — mission, design, code quality, bugs, tests — and a judge decides which of their flags are worth the reader's time. The workers aim for recall, the judge for precision. Keeping them apart stops a reviewer from talking itself into its own findings.
+Six workers look for problems, each owning one subtask — mission, design, code quality, bugs, tests, production — and a judge decides which of their flags are worth the reader's time. The workers aim for recall, the judge for precision. Keeping them apart stops a reviewer from talking itself into its own findings.
 
 Before the workers start, a mapper reads the whole change once and writes down what is there — the requirements, the areas, the resources touched and who else touches them — so every worker starts from the same facts, with the same IDs, and spends its effort judging.
 
@@ -22,7 +22,7 @@ The first argument picks the mode: `fast` or `normal`. Anything else — a PR nu
 | Context | PR, ticket, linked specs, review threads, stack, standards | PR and ticket, review threads, standards; no specs or stack |
 | Dependencies and tests | installed in the worktree; the PR's own tests are left to CI, and agents run only new tests they write to check what those don't cover | not installed; nothing runs, evidence is traced through the code |
 | Mapper | yes | no |
-| Workers | four or five, one per subtask | two in parallel: correctness (mission, bugs) and maintainability (design, quality, tests) |
+| Workers | five or six, one per subtask | two in parallel: correctness (mission, bugs) and maintainability (design, quality, tests, production) |
 | Judge | verifies by running the workers' new tests and reading | verifies by reading |
 
 Steps 1–6 below describe `normal`. In `fast`, follow them with the changes in **Fast mode**.
@@ -48,14 +48,14 @@ The prompts stay in the report directory, so you can see exactly what each agent
 | `worktree` | 1 | The worktree's absolute path, alone | all |
 | `merge_base` | 1 | The merge-base commit, alone | mapper |
 | `target` | 1 | The PR number and title or the branch; the head commit; the base ref and the merge-base; the diff command `git -C <worktree> diff <merge-base> HEAD`; the commits (`git -C <worktree> log --oneline <merge-base>..HEAD`); the changed-line count | all |
-| `test_setup` | 1 | The PR's CI checks and their state at the head commit (or "No CI run."), and the command to run a single test file — or why tests can't run here, so every agent traces paths instead | mapper, mission, bugs, tests, judge |
+| `test_setup` | 1 | The PR's CI checks and their state at the head commit (or "No CI run."), and the command to run a single test file — or why tests can't run here, so every agent traces paths instead | mapper, mission, bugs, tests, production, judge |
 | `mission` | 2 | Verbatim: the PR description, the linked ticket, and the paths of the specs, plans and design docs they point to — or the user's own words | all |
-| `standards` | 2 | The paths of every `CLAUDE.md` from the root down to each touched directory, `CONTRIBUTING.md`, a glossary, and the like | mapper, design, quality, judge |
-| `stack` | 2 | Each related PR — below this one or built on it — and what it changes; or "Not stacked." | mapper, design, bugs, judge |
+| `standards` | 2 | The paths of every `CLAUDE.md` from the root down to each touched directory, `CONTRIBUTING.md`, a glossary, and the like | mapper, design, quality, production, judge |
+| `stack` | 2 | Each related PR — below this one or built on it — and what it changes; or "Not stacked." | mapper, design, bugs, production, judge |
 | `prior_review` | 2 | The PR's review threads with their resolved state; or "None." | judge only |
 | `previous_head` | 2 | The head of the previous review of this PR or branch; or "None." | mapper, workers |
 | `previous_review` | 2 | The path of the previous `review.md`; or "None." | judge only |
-| `focus_mission`, `focus_design`, `focus_quality`, `focus_bugs`, `focus_tests` | 3, by the mapper | Where that worker should start, generated from the map | that worker |
+| `focus_mission`, `focus_design`, `focus_quality`, `focus_bugs`, `focus_tests`, `focus_production` | 3, by the mapper | Where that worker should start, generated from the map | that worker |
 | `shape` | 4 | Which workers ran, which were skipped and why, and any worker that failed | judge |
 | `report_dir` | — | Filled in by the script | all |
 
@@ -104,19 +104,21 @@ Write `mission`, `standards`, `stack`, `prior_review`, `previous_head` and `prev
 python3 <skill-dir>/assemble.py "$report" mapper
 ```
 
-Spawn the mapper and wait for it. It writes `$report/context.md`, the five `focus_*` slots, and `$report/flags/mapper.md`. If it reports a spec it couldn't open, get it for the mapper — ask the user if you must — and spawn it again.
+Spawn the mapper and wait for it. It writes `$report/context.md`, the six `focus_*` slots, and `$report/flags/mapper.md`. If it reports a spec it couldn't open, get it for the mapper — ask the user if you must — and spawn it again.
 
 ## 4. Run the workers
 
 Pick the shape from the changed-line count:
 
-- **Under ~50 lines:** mission, quality, bugs, tests. Skip design.
-- **~50 lines and up:** all five. Never run more than five.
+- **Under ~50 lines:** mission, quality, bugs, tests, production. Skip design.
+- **~50 lines and up:** all six. Never run more than six.
+
+Skip production only when the change can't reach a running system — docs, comments, or tests alone — and say so in `shape`.
 
 Write `shape`, then assemble the workers in the shape and spawn them all in one message — they own different subtasks and don't need each other:
 
 ```bash
-python3 <skill-dir>/assemble.py "$report" mission design quality bugs tests
+python3 <skill-dir>/assemble.py "$report" mission design quality bugs tests production
 ```
 
 Each worker writes `$report/flags/<subtask>.md` and answers with a one-line-per-flag list. When they have all returned, check every worker in the shape left its flags file. Spawn a worker that didn't once more with the same prompt; if it fails again, add that to `shape`.
