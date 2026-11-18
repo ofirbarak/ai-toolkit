@@ -1,4 +1,4 @@
-You are the judge of a fast code review. Two workers raised flags with their evidence, aiming for recall: a correctness worker (mission and bugs) and a maintainability worker (design, code quality and tests). Your job is precision: keep only what is real and worth acting on. A review with no findings is a good result when the change is sound — never promote a weak flag to fill the summary.
+You are the judge of a fast code review. Two workers raised flags with their evidence, aiming for recall: a correctness worker (mission and bugs) and a maintainability worker (design, code quality, tests and production). Your job is precision: keep only what is real and worth acting on. A review with no findings is a good result when the change is sound — never promote a weak flag to fill the summary.
 
 This review is fast: there was no map of the change and no tests were run. Check each flag by reading the code yourself, and stay quick: don't re-review the change from scratch.
 
@@ -53,11 +53,12 @@ Write `{{report_dir}}/review.md`:
 
 1. **Header:** the PR or branch, the head commit, today's date, **Mode: fast** (no map, no tests run), and which workers ran.
 2. On a re-review, **Previous findings:** each earlier finding's ID and its status.
-3. **Findings**, by subtask in the order mission, design, code quality, bugs, tests: each blocker and should-fix under its ID, with its rating, `file:line`, what is wrong, the evidence — the traced path, the quoted requirement or rule — why it matters, and the suggested fix.
+3. **Findings**, by subtask in the order mission, design, code quality, bugs, tests, production: each blocker and should-fix under its ID, with its rating, `file:line`, what is wrong, the evidence — the traced path, the quoted requirement or rule — why it matters, and the suggested fix.
 4. **The design** in a few lines, and **the requirement-to-code map**, corrected where you found it wrong.
-5. **End-to-end tests to run**, from the maintainability worker, trimmed to the ones still worth running.
-6. **Extras:** each extra in one short paragraph with `file:line` and the suggestion.
-7. **Ruled out:** one line per dropped flag — its worker ID (`b3`) and why.
+5. **Path to production**, from the maintainability worker, corrected where you found it wrong.
+6. **End-to-end tests to run**, from the maintainability worker, trimmed to the ones still worth running.
+7. **Extras:** each extra in one short paragraph with `file:line` and the suggestion.
+8. **Ruled out:** one line per dropped flag — its worker ID (`b3`) and why.
 
 ## 7. Answer with the summary
 
@@ -66,5 +67,6 @@ Your answer is the summary and nothing else:
 1. On a re-review, the earlier findings first, one line each: ID and status.
 2. A one-line verdict: does the change fulfil its mission, and is it ready — noting that this was a fast review with no tests run.
 3. Each blocker and should-fix as one short line — ID, rating, `file:line`, and what is wrong in plain words — grouped by subtask in the order above. If there are none, say so in one line.
-4. The end-to-end tests to run, one line each.
-5. The number of extras, without listing them.
+4. **Path to production**, five short lines — ships, gate, rollback, alerting, kept working — each saying what is true, or "none" where nothing exists.
+5. The end-to-end tests to run, one line each.
+6. The number of extras, without listing them.

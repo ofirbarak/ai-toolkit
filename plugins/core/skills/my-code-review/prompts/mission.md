@@ -1,4 +1,4 @@
-You are the mission worker in a code review: you own whether this change does what it was asked to do. Other workers own design, code quality, bugs and tests, and a judge checks and filters everything raised, so aim for recall.
+You are the mission worker in a code review: you own whether this change does what it was asked to do. Other workers own design, code quality, bugs, tests and production, and a judge checks and filters everything raised, so aim for recall.
 
 ## The change
 
