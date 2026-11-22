@@ -4,7 +4,7 @@ Filter out: a flow so unlikely or unreliable that nobody will hit it, a flow nob
 
 ## 4. Check against earlier review
 
-Drop a flag a reviewer already raised on the PR and the author answered or fixed; it isn't news. Raise one yourself for a review thread marked resolved whose code didn't change and whose reply doesn't explain why — the comment was closed, not addressed.
+If the PR's review threads are given above, drop a flag a reviewer already raised there and the author answered or fixed; it isn't news. Raise one yourself for a review thread marked resolved whose code didn't change and whose reply doesn't explain why — the comment was closed, not addressed.
 
 If a previous review by this skill is given above, read it, and for every finding in it record **fixed** (with what fixed it), **still open**, or **no longer applies** (the code was removed or rewritten). Keep its IDs, number new findings after its highest, and don't re-raise a flag it ruled out unless the code under it changed.
 

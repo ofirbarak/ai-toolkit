@@ -15,14 +15,16 @@ Before the workers start, a mapper reads the whole change once and writes down w
 
 ## Mode
 
-The first argument picks the mode: `fast` or `normal`. Anything else — a PR number, a branch, nothing at all — means `normal`, and the arguments that follow the mode name the target: `/my-code-review fast 123`, `/my-code-review normal my-branch`, `/my-code-review 123`. Without arguments, a user who asks in words for a quick or fast review gets `fast`.
+The first argument picks the mode: `fast` or `normal`. Anything else — a PR number, a branch, nothing at all — means `normal`, and the arguments that follow the mode name the target, a branch or a PR number: `/my-code-review fast my-branch`, `/my-code-review normal my-branch`, `/my-code-review 123`. No target means the current branch. Without arguments, a user who asks in words for a quick or fast review gets `fast`.
 
 | | normal | fast |
 |-|--------|------|
-| Context | PR, ticket, linked specs, review threads, stack, standards | PR and ticket, review threads, standards; no specs or stack |
-| Dependencies and tests | installed in the worktree; the PR's own tests are left to CI, and agents run only new tests they write to check what those don't cover | not installed; nothing runs, evidence is traced through the code |
+| Target | the head commit against its target, in a fresh worktree, with CI read and the changed lines counted | the head commit against its target (the PR's base, else the default branch), in a fresh worktree; nothing else |
+| Context | PR, ticket, linked specs, review threads, stack, standards | the PR description only; no ticket, specs, review threads or stack; workers find the standards files themselves |
+| Mission check | yes | no |
+| Dependencies and tests | installed in the worktree; the PR's own tests are left to CI, and agents run only new tests they write to check what those don't cover | nothing installed or run; evidence is traced through the code |
 | Mapper | yes | no |
-| Workers | four or five in parallel: mission, design, quality, bugs-and-tests, production | two in parallel: correctness (mission, bugs, tests) and maintainability (design, quality, production) |
+| Workers | four or five in parallel: mission, design, quality, bugs-and-tests, production | three or four in parallel: design, quality, bugs-and-tests, production; each reads the code with no map and runs nothing |
 | Judge | verifies by running the workers' new tests and reading | verifies by reading |
 
 Steps 1–6 below describe `normal`. In `fast`, follow them with the changes in **Fast mode**.
@@ -61,7 +63,7 @@ The prompts stay in the report directory, so you can see exactly what each agent
 
 `prior_review` and `previous_review` go to the judge only, so the workers look with fresh eyes.
 
-In fast mode, `test_setup`, `stack` and the `focus_*` slots aren't written: the fast workers read `worktree`, `merge_base`, `target`, `mission` and `previous_head`, the maintainability worker also `standards`, and the fast judge `standards`, `prior_review`, `shape` and `previous_review` as well.
+Fast mode writes only `worktree`, `merge_base`, `target`, `mission` (the PR description alone), `previous_head`, `previous_review` and `shape`.
 
 ## 1. Pin the target
 
@@ -137,25 +139,45 @@ Open with the judge's summary as it is. End with the absolute path to `$report/r
 
 ## Fast mode
 
-The same steps, trimmed for speed. Say at the start that this is a fast review.
+A quick pass over a branch against its target. Say at the start that this is a fast review. It skips the rest of pinning the target (installing dependencies, CI), most of gathering the context, the mission check and the mapper. Of the context, it reads only the PR description: no ticket, spec or review thread.
 
-1. **Pin the target** as usual, but skip step 1.4: don't install dependencies or run a test. Name the report directory `code-review-<stamp>-fast-report`, so a later review can tell the modes apart.
-2. **Gather the context** without the specs and docs the PR or ticket links to, and without the stack. Read the PR description and the linked ticket, the review threads, and the standards files. If there is no mission, take it from the commit messages rather than asking the user, and say so in `mission`. Write `mission`, `standards`, `prior_review`, `previous_head` and `previous_review`.
-3. **Skip the mapper.**
-4. **Run two workers**, whatever the size of the change. Write `shape` (`fast: correctness, maintainability`), then assemble and spawn both in one message:
+1. **Resolve the branch, its target and its PR description.**
+   - **A PR number:** `gh pr view <n> --json headRefOid,headRefName,baseRefName,title,body`, then `git fetch origin pull/<n>/head <baseRefName>`.
+   - **A branch:** its target is its open PR's base (`gh pr view <branch> --json number,baseRefName,title,body`), or the default branch (`origin/HEAD`) when it has no PR. Run `git fetch origin <branch> <target>`; a branch that exists only locally needs no fetch of its own.
+   - **Nothing:** the current branch, resolved the same way. Uncommitted changes are not reviewed.
+
+   Then create the worktree and the report directory, with nothing installed:
 
    ```bash
-   python3 <skill-dir>/assemble.py "$report" fast-correctness fast-maintainability
+   merge_base="$(git merge-base origin/<target> <head>)"
+   stamp="$(git rev-parse --short <head>)-$(date +%Y%m%d-%H%M%S)"
+   wt="${TMPDIR:-/tmp}/code-review-$stamp"
+   report="$wt-fast-report"
+   git worktree add --detach "$wt" <head>
+   mkdir -p "$report"/{slots,flags}
    ```
 
-   They write `$report/flags/correctness.md` and `$report/flags/maintainability.md`. Retry a worker that left no file once, as in normal mode.
-5. **Run the judge** from `fast-judge`:
+   Stop early, spawning nothing, if the head doesn't resolve or `git diff --quiet "$merge_base" <head>` exits 0.
+2. **Write the slots:**
+   - `worktree`: the worktree's path, alone;
+   - `merge_base`: the merge-base commit, alone;
+   - `target`: the branch (and PR number, if any), the head commit, the target branch and the merge base; the diff command `git -C <worktree> diff <merge-base> HEAD`; the commits (`git -C <worktree> log --oneline <merge-base>..HEAD`); and the changed-line count, without lockfiles and generated files;
+   - `mission`: the PR's title and description, verbatim. If there is no PR, write "No PR: take what the change is for from its commit messages.";
+   - `previous_head` and `previous_review`: see **Re-review**, or "None.".
+3. **Run the workers:** design, quality, bugs-tests and production, the same subtasks as normal mode without mission. Pick the shape the same way as normal mode: skip design under ~50 changed lines, and skip production when the change can't reach a running system. Write `shape` (for example `fast: design, quality, bugs-tests, production`), then assemble the workers in the shape and spawn them all in one message:
+
+   ```bash
+   python3 <skill-dir>/assemble.py "$report" fast-design fast-quality fast-bugs-tests fast-production
+   ```
+
+   Each writes `$report/flags/<worker>.md` (`design.md`, `quality.md`, `bugs-tests.md`, `production.md`). Retry a worker that left no file once, as in normal mode.
+4. **Run the judge** from `fast-judge`:
 
    ```bash
    python3 <skill-dir>/assemble.py "$report" fast-judge
    ```
 
-6. **Report** as usual, and end by offering a normal review when the fast one leaves a finding marked **unverified**, or when the change is over ~1,000 lines.
+5. **Report:** open with the judge's summary as it is, end with the path to `$report/review.md`, then remove the worktree with `git worktree remove --force "$wt"`. Offer a normal review when the fast one leaves a finding marked **unverified**, when the change is over ~1,000 lines, or when the user needs to know whether it meets its mission.
 
 ## Re-review
 
@@ -163,7 +185,7 @@ When the user asks to review the same PR or branch again, usually after fixing f
 
 1. **Find the previous review:** the newest `${TMPDIR:-/tmp}/code-review-*-report/review.md` whose header names the same PR or branch, in either mode. If there is none, or more than one could fit, ask the user for its path.
 2. **Write** its head commit, from its header, into `previous_head`, and its path into `previous_review`. The mapper then maps what changed since, the workers read that diff closely — fixes are where new bugs come from — and the judge gives each earlier finding a status before the new ones.
-3. **Run steps 1–6 as usual**, in the mode the user asked for this time, in a new worktree and report directory.
+3. **Run the review as usual**, in the mode the user asked for this time, with a new report directory (and, in normal mode, a new worktree).
 
 ## Changing a prompt
 
